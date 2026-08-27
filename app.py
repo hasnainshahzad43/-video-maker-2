@@ -1,6 +1,7 @@
 import os
 import asyncio
 import re
+import time
 import requests
 import streamlit as st
 from moviepy import ImageClip, AudioFileClip, concatenate_videoclips
@@ -60,14 +61,29 @@ if st.button("Generate Premium Video 🚀", use_container_width=True):
         for i, line in enumerate(lines):
             status_text.markdown(f"🎭 **Rendering Premium Scene {i+1}/{total_scenes}...**")
             audio_path = f"voice_{i}.mp3"
-            asyncio.run(generate_audio(line, selected_voice, audio_path))
+            
+            # Safe Audio Generation with Retries
+            audio_success = False
+            for attempt in range(3):
+                try:
+                    asyncio.run(generate_audio(line, selected_voice, audio_path))
+                    if os.path.exists(audio_path) and os.path.getsize(audio_path) > 0:
+                        audio_success = True
+                        break
+                except Exception as tts_err:
+                    time.sleep(2)  # Wait before retrying
+            
+            # If Audio Fails, skip to avoid app crash
+            if not audio_success:
+                st.warning(f"⚠️ Scene {i+1} ka audio skip ho gaya server load ki wajah se.")
+                continue
+                
             audio_clip = AudioFileClip(audio_path)
             duration = audio_clip.duration
             
             clean_prompt = re.sub(r'[^a-zA-Z0-9\s]', '', line)
             final_prompt = f"{mood_prompts[mood_choice]} {clean_prompt}"
             
-            # Encoded Pollinations URL
             encoded_prompt = requests.utils.quote(final_prompt)
             image_url = f"https://pollinations.ai{encoded_prompt}?width={v_width}&height={v_height}&enhance=true&seed={i}"
             image_path = f"image_{i}.jpg"
@@ -87,26 +103,32 @@ if st.button("Generate Premium Video 🚀", use_container_width=True):
             video_clips.append(scene_clip)
             progress_bar.progress(int((i + 1) / total_scenes * 100))
             
-        status_text.markdown("🎥 **Compiling final video export...**")
-        try:
-            final_video = concatenate_videoclips(video_clips, method="compose")
-            output_video = "premium_viral_output.mp4"
-            final_video.write_videofile(output_video, fps=24, codec="libx264", audio_codec="aac")
+            # Rate limiting delay to keep Microsoft Edge TTS Server happy
+            time.sleep(2)
             
-            final_video.close()
-            for i in range(len(lines)):
-                try:
-                    os.remove(f"voice_{i}.mp3")
-                    os.remove(f"image_{i}.jpg")
-                except: 
-                    pass
-            
-            status_text.empty()
-            progress_bar.empty()
-            st.success("🎉 Premium Video Generated!")
-            st.video(output_video)
-            
-            with open(output_video, "rb") as file:
-                st.download_button("📥 Download Video to Gallery", data=file, file_name="premium_ai_documentary.mp4", mime="video/mp4", use_container_width=True)
-        except Exception as e:
-            st.error(f"Error during video composition: {e}")
+        if not video_clips:
+            st.error("❌ Koi bhi scene generate nahi ho saka. Dubara koshish karein.")
+        else:
+            status_text.markdown("🎥 **Compiling final video export...**")
+            try:
+                final_video = concatenate_videoclips(video_clips, method="compose")
+                output_video = "premium_viral_output.mp4"
+                final_video.write_videofile(output_video, fps=24, codec="libx264", audio_codec="aac")
+                
+                final_video.close()
+                for i in range(len(lines)):
+                    try:
+                        os.remove(f"voice_{i}.mp3")
+                        os.remove(f"image_{i}.jpg")
+                    except: 
+                        pass
+                
+                status_text.empty()
+                progress_bar.empty()
+                st.success("🎉 Premium Video Generated!")
+                st.video(output_video)
+                
+                with open(output_video, "rb") as file:
+                    st.download_button("📥 Download Video to Gallery", data=file, file_name="premium_ai_documentary.mp4", mime="video/mp4", use_container_width=True)
+            except Exception as e:
+                st.error(f"Error during video composition: {e}")
